@@ -9,9 +9,17 @@ AWS Lambda - Up to 1 million calls per month
 Amazon DynamoDB - Up to 25Gb always free  
 Amazon Cognito - Up to 50.000 MAUs each month  
 
-# Source information
+# Examples Source
 
 https://www.vic-l.com/aws-lamba-and-api-gateway-integration-with-terraform-to-collect-emails/
 
+https://learn.hashicorp.com/tutorials/terraform/lambda-api-gateway  
+
+# Requirements
+
+* S3 Bucket "jjc-terraform-states" in eu-west-2 (terraform shared state)
 
 
+https://medium.com/onfido-tech/aws-api-gateway-with-terraform-7a2bebe8b68f  
+
+https://aws.amazon.com/blogs/developer/provision-aws-infrastructure-using-terraform-by-hashicorp-an-example-of-web-application-logging-customer-data/  
