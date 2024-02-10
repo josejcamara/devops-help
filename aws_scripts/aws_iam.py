@@ -1,6 +1,9 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# pylint: disable=import-error
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+
 """ AWS IAM management """
 
 import argparse
