@@ -1,7 +1,7 @@
+""" Manage Spreadsheets """
+
 # pylint: disable=import-error
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
-
-""" Manage Spreadsheets """
 
 import openpyxl
 
@@ -56,5 +56,8 @@ if __name__ == "__main__":
 
     data1 = [["Title1", "Title2"], ["row1_col1", "row1_col2"]]
     xls1.set_sheet_data(XID1, data1)
+
+    if not namefile.endswith('xlsx'):
+        namefile = namefile + '.xlsx'
 
     xls1.save(namefile)

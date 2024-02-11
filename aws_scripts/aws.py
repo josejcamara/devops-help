@@ -3,12 +3,13 @@
 
 """ AWS Utils management """
 
-# pylint: disable=import-error
+# pylint: disable=import-error,broad-exception-caught
 # pyright: reportMissingImports=false, reportMissingModuleSource=false
 
-import os
-import yaml
 import argparse
+import os
+import sys
+import yaml
 import boto3
 
 # MyLibraries
@@ -16,7 +17,7 @@ import spreadsheet as xls
 import iam
 import organization as org
 
-CFG_FILENAME = "aws.yml"
+CFG_FILENAME = "accounts.yml"
 
 
 def check_arguments():
@@ -28,6 +29,7 @@ def check_arguments():
 
     args = parser.parse_args()
     return args
+
 
 def get_account_parent_filtered(acc_name):
     """ Tries to split the accounts according their parent """
@@ -56,50 +58,54 @@ def get_account_parent_filtered(acc_name):
         parent = cwg_account_alias
         role = cwg_role
 
-    return (parent,role)
+    return (parent, role)
 
 
 def generate_accounts_config():
-    """ 
-        If you don't have a aws.yml file, it will try to create one for you 
+    """
+        If you don't have a aws.yml file, it will try to create one for you
         Your .aws/credentials profile_name has to match the aws.yml groups_id
     """
-    caller_account_alias = boto3.client('iam').list_account_aliases()['AccountAliases'][0]
+    aliases = boto3.client('iam').list_account_aliases()
+    caller_account_alias = aliases['AccountAliases'][0]
 
     ls_acc = org.get_account_list()
 
-    data = dict()
+    data = {}
     for acc_id, acc_name in ls_acc:
         parent, role = get_account_parent_filtered(acc_name)
         if parent is None:
             parent = caller_account_alias
 
-        if not parent in data:
+        if parent not in data:
             data[parent] = []
 
-        data[parent].append(','.join([acc_id,acc_name, role]))
+        data[parent].append(','.join([acc_id, acc_name, role]))
 
-    with open(CFG_FILENAME, 'w') as outfile:
+    with open(CFG_FILENAME, 'w', encoding="utf-8") as outfile:
         yaml.dump(data, outfile, default_flow_style=False)
 
 
 def read_accounts_config():
+    """ Read the accounts config file """
     cfg = {}
-    with open(CFG_FILENAME) as f:
+    with open(CFG_FILENAME, encoding="utf-8") as f:
         cfg = yaml.load(f, Loader=yaml.FullLoader)
 
     return cfg
 
-def get_iam_users_by_account(accounts_groups, output="iam_users.xls"):
+
+def get_iam_users_by_account(accounts_groups):
     """ List of iam users """
-    users_by_account = dict()
+    users_by_account = {}
 
     for grp_id in accounts_groups:
         try:
             session = boto3.Session(profile_name=grp_id)
             print(f"Creating session with profile {grp_id}")
-        except:
-            print(f"[ERROR] Profile {grp_id} not found in your aws configuration")
+        except Exception as e:
+            print(f"[ERROR] Profile {grp_id} not found in your aws config")
+            print(e)
             continue
 
         client = session.client('sts')
@@ -107,17 +113,20 @@ def get_iam_users_by_account(accounts_groups, output="iam_users.xls"):
             account_info = grp_row.split(',')
             account_name = account_info[1]
             print(f">> Getting users from {account_name}")
-            users_by_account[account_name] = iam.get_iam_user_list(client, account_info)
+            users_by_account[account_name] = iam.get_iam_user_list(
+                client,
+                account_info)
 
     return users_by_account
 
 
 def create_xls(data_dc, filename):
+    """ Creates a excel file  """
     if filename is None:
         filename = "output.xlsx"
 
     my_xls = xls.Spreadsheet()
-    sheets_dc = dict()
+    sheets_dc = {}
     sheets_header = [
         'AccountName',
         'AccountId',
@@ -133,27 +142,48 @@ def create_xls(data_dc, filename):
         ]
 
     for acc_name, user_list in data_dc.items():
-        acc_group = '-'.join(acc_name.split('-')[:-1])   # Will group by account_name prefix
-        
+        # To group by account_name prefix
+        acc_group = '-'.join(acc_name.split('-')[:-1])
+
         if user_list is None:
             user_list = [['No Data']]
 
-        if not acc_group in sheets_dc:
+        if acc_group not in sheets_dc:
             user_list.insert(0, sheets_header)
             sheets_dc[acc_group] = my_xls.add_sheet(acc_group, user_list)
         else:
-            my_xls.add_sheet_data(acc_group, user_list) 
+            my_xls.add_sheet_data(acc_group, user_list)
 
     my_xls.save(filename)
     print(f"Result saved in {filename}")
 
 
-
-
 def main(options):
     """ Main method """
+
+    identity = boto3.client('sts').get_caller_identity()
+    default_user = identity.get('Arn')
+    default_account_id = identity.get('Account')
+    aliases = boto3.client('iam').list_account_aliases()
+    default_account_alias = aliases['AccountAliases'][0]
+
+    print("#"*50)
+    print("ATTENTION:")
+    print(f"You are running this script as '{default_user}' \
+          from '{default_account_alias} - {default_account_id}' ")
+    print("#"*50)
+
+    answer = ""
+    while answer.lower() not in ["y", "n"]:
+        print('OK to continue??')
+        answer = input()
+    if answer.lower() != 'y':
+        sys.exit(0)
+
     if not os.path.isfile(CFG_FILENAME):
-        print(f"No config file '{CFG_FILENAME}' found. Generating one for you from... {default_account_alias} - {default_account_id}")
+        print(f"No config file '{CFG_FILENAME}' found. \
+              Generating one for you from... \
+              {default_account_alias} - {default_account_id}")
         generate_accounts_config()
 
     accounts = read_accounts_config()
@@ -166,22 +196,7 @@ def main(options):
     else:
         print("Invalid option")
 
+
 if __name__ == "__main__":
     opt = check_arguments()
-
-    default_user = boto3.client('sts').get_caller_identity().get('Arn')
-    default_account_id = boto3.client('sts').get_caller_identity().get('Account')
-    default_account_alias = boto3.client('iam').list_account_aliases()['AccountAliases'][0]
-    print("#"*50)
-    print("ATTENTION:")
-    print(f"You are running this script as '{default_user}' from '{default_account_alias} - {default_account_id}' ")
-    print("#"*50)
-
-    answer = ""
-    while answer.lower() not in ["y", "n"]:
-        print('OK to continue??')
-        answer = input()
-    if answer.lower() != 'y':
-        exit(0)
-
     main(opt)
