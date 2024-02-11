@@ -1,0 +1,20 @@
+# This YAML structure
+# Using ~/.aws/credentials role names...
+#
+# [role_name_caller_account]
+#   role: [role_to_assume_into_child_account ]
+#   accounts_id:
+#     - account1_number, account_alias
+#     - account2_number, account_alias
+#
+
+aws-cor-sec:
+  role: DAG-AWS-corp1-aws-admin
+  accounts:
+    - 123458003201,aws-trn1-acc
+
+aws-core:
+  role: DAG-AWS-corp2-aws-admin
+  accounts:
+    - 543218003201,aws-trn2-acc
+
