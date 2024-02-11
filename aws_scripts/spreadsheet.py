@@ -32,6 +32,10 @@ class Spreadsheet:
         """ Set the spreadsheet data """
         self.data[sheet_id] = data
 
+    def add_sheet_data(self, sheet_id, data):
+        """ Add data to the spreadsheet """
+        self.data[sheet_id].extend(data)
+
     def save(self, filename):
         """ Save to a file """
         for sid, sheet in self.sheets.items():

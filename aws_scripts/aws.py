@@ -9,12 +9,12 @@
 import os
 import yaml
 import argparse
-# import click
 import boto3
 
 # MyLibraries
 import spreadsheet as xls
 import iam
+import organization as org
 
 CFG_FILENAME = "aws.yml"
 
@@ -36,31 +36,48 @@ def get_account_parent_filtered(acc_name):
     mc_account_alias = "MC-ONT-SECURITY"
     cwg_account_alias = "Unknown"
 
+    old_role = 'administrator'
+    dag_role = 'DAG-AWS-ont-aws-admin'
+    cwg_role = '?'
+    mc_role = '?'
+    # --
+
     parent = None
+    role = dag_role
     if acc_name == acc_name.upper():
         if acc_name.startswith('MC-'):
             parent = mc_account_alias
+            role = mc_role
         else:
             parent = old_account_alias
+            role = old_role
+
     elif acc_name.startswith('ont-cwg'):
         parent = cwg_account_alias
+        role = cwg_role
 
-    return parent
+    return (parent,role)
 
 
 def generate_accounts_config():
-    """ If you don't have a aws.yml file, it will try to create one for you """
+    """ 
+        If you don't have a aws.yml file, it will try to create one for you 
+        Your .aws/credentials profile_name has to match the aws.yml groups_id
+    """
     caller_account_alias = boto3.client('iam').list_account_aliases()['AccountAliases'][0]
-    ls_acc = get_accounts_id_organization()
+
+    ls_acc = org.get_account_list()
 
     data = dict()
     for acc_id, acc_name in ls_acc:
-        parent = get_account_parent_filtered(acc_name)
+        parent, role = get_account_parent_filtered(acc_name)
         if parent is None:
             parent = caller_account_alias
+
         if not parent in data:
             data[parent] = []
-        data[parent].append(','.join([acc_id,acc_name]))
+
+        data[parent].append(','.join([acc_id,acc_name, role]))
 
     with open(CFG_FILENAME, 'w') as outfile:
         yaml.dump(data, outfile, default_flow_style=False)
@@ -73,54 +90,64 @@ def read_accounts_config():
 
     return cfg
 
-# @click.command()
-# @click.argument('action', default="")
-# @click.option('--filename', prompt='Filename', help='The person to greet.')
-# def main(action, filename=None):
-#     """Simple program that greets NAME for a total of COUNT times."""
-#     print("ssss")
-
-def get_accounts_id_organization(exclude=[], debug=False):
-    """ 
-        Returns the list of [account_id, account_name] in the organization you are logged into.
-        It needs new_lz_session permissions
-    """
-    # Create an Organizations client, ensuring proper credentials and permissions
-    org_client = boto3.client('organizations')
-
-    # Use a paginator to efficiently handle potentially large result sets
-    paginator = org_client.get_paginator('list_accounts')
-
-    # Iterate through all accounts in the organization, including those in nested OUs
-    org_ids = []
-    for response in paginator.paginate(MaxResults=10):
-        for account in response['Accounts']:
-            acc_id = account['Id']
-            acc_name = account['Name']
-            if acc_id in exclude: 
-                if debug:
-                    print(f"Excluding: Account ID: {acc_id}, Account Name: {acc_name}")
-                continue
-
-            if debug:
-                print(f"Account ID: {acc_id} - {acc_name} - {account['Status']} - {account['Email']}")
-
-            org_ids.append([acc_id, acc_name])
-
-    return org_ids
-
-def list_iam_users(output="iam_users.xls"):
+def get_iam_users_by_account(accounts_groups, output="iam_users.xls"):
     """ List of iam users """
-    xls1 = xls.Spreadsheet()
+    users_by_account = dict()
 
-    xid1 = "sheet1"
-    xls1.add_sheet(xid1)
+    for grp_id in accounts_groups:
+        try:
+            session = boto3.Session(profile_name=grp_id)
+            print(f"Creating session with profile {grp_id}")
+        except:
+            print(f"[ERROR] Profile {grp_id} not found in your aws configuration")
+            continue
 
-    data1 = [["Title1", "Title2"], ["row1_col1", "row1_col2"]]
-    xls1.set_sheet_data(xid1, data1)
+        client = session.client('sts')
+        for grp_row in accounts_groups[grp_id]:
+            account_info = grp_row.split(',')
+            account_name = account_info[1]
+            print(f">> Getting users from {account_name}")
+            users_by_account[account_name] = iam.get_iam_user_list(client, account_info)
 
-    xls1.save(output)
-    print(f"Result saved in {output}")
+    return users_by_account
+
+
+def create_xls(data_dc, filename):
+    if filename is None:
+        filename = "output.xlsx"
+
+    my_xls = xls.Spreadsheet()
+    sheets_dc = dict()
+    sheets_header = [
+        'AccountName',
+        'AccountId',
+        'Username',
+        'ConsoleLogin',
+        'Tag_Owner',
+        'Tag_App',
+        'KeyNumber',
+        'KeyId',
+        'KeyStatus',
+        'DaysActive',
+        'LastDayUsed'
+        ]
+
+    for acc_name, user_list in data_dc.items():
+        acc_group = '-'.join(acc_name.split('-')[:-1])   # Will group by account_name prefix
+        
+        if user_list is None:
+            user_list = [['No Data']]
+
+        if not acc_group in sheets_dc:
+            user_list.insert(0, sheets_header)
+            sheets_dc[acc_group] = my_xls.add_sheet(acc_group, user_list)
+        else:
+            my_xls.add_sheet_data(acc_group, user_list) 
+
+    my_xls.save(filename)
+    print(f"Result saved in {filename}")
+
+
 
 
 def main(options):
@@ -129,10 +156,11 @@ def main(options):
         print(f"No config file '{CFG_FILENAME}' found. Generating one for you from... {default_account_alias} - {default_account_id}")
         generate_accounts_config()
 
-    accounts_cfg = read_accounts_config()
+    accounts = read_accounts_config()
 
     if options.action == "list_users":
-        list_iam_users()
+        users_dc = get_iam_users_by_account(accounts)
+        create_xls(users_dc, options.filename)
     elif options.action == "set_tag":
         print("Coming....")
     else:
