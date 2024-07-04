@@ -16,6 +16,7 @@ import boto3
 import spreadsheet as xls
 import iam
 import organization as org
+import ec2_inventory as ec2
 
 CFG_FILENAME = "accounts.yml"
 
@@ -23,7 +24,7 @@ CFG_FILENAME = "accounts.yml"
 def check_arguments():
     """ Alternative arguments with argparse """
     parser = argparse.ArgumentParser(description='AWS IAM management')
-    parser.add_argument('action', choices=["list_users", "set_tag"])
+    parser.add_argument('action', choices=["list_users", "list_ec2", "set_tag"])
     parser.add_argument('-f', '--filename')
     parser.add_argument('-v', '--verbose')
 
@@ -119,26 +120,67 @@ def get_iam_users_by_account(accounts_groups):
 
     return users_by_account
 
+def get_ec2_inventory_by_account(accounts_groups, regions=['eu-west-1']):
+    """ List of EC2 """
+    ec2_by_account = {}
 
-def create_xls(data_dc, filename):
+    for grp_id in accounts_groups:
+        try:
+            session = boto3.Session(profile_name=grp_id)
+            print(f"Creating session with profile {grp_id}")
+        except Exception as e:
+            print(f"[ERROR] Profile {grp_id} not found in your aws config")
+            print(e)
+            continue
+
+        for region in regions:
+            client = session.client('sts',region_name=region)
+            for grp_row in accounts_groups[grp_id]:
+                account_info = grp_row.split(',')
+                account_name = account_info[1]
+                print(f">> Getting EC2 instances from {account_name} on region {region}")
+                if not account_name in ec2_by_account: ec2_by_account[account_name] = []
+                ec2_by_account[account_name].extend(ec2.get_instances_in_account(
+                    client,
+                    account_info,
+                    region=region
+                ))
+
+    return ec2_by_account
+
+
+def create_xls(id_report, data_dc, filename):
     """ Creates a excel file  """
     if filename is None:
         filename = "output.xlsx"
 
     my_xls = xls.Spreadsheet()
     sheets_dc = {}
-    sheets_header = [
-        'AccountName',
-        'AccountId',
-        'Username',
-        'ConsoleLogin',
-        'Tag_Owner',
-        'Tag_App',
-        'KeyNumber',
-        'KeyId',
-        'KeyStatus',
-        'DaysActive',
-        'LastDayUsed'
+    sheets_header = []
+    if id_report == "list_users":
+        sheets_header = [
+            'AccountName',
+            'AccountId',
+            'Username',
+            'ConsoleLogin',
+            'Tag_Owner',
+            'Tag_App',
+            'KeyNumber',
+            'KeyId',
+            'KeyStatus',
+            'DaysActive',
+            'LastDayUsed'
+            ]
+    elif id_report == "list_ec2":
+        sheets_header = [
+            "AccountId",
+            "Region",
+            "InstanceId",
+            "State",
+            "AMI_id",
+            "PublicAMI",
+            "Description",
+            "SSH open CIDR"
         ]
 
     for acc_name, user_list in data_dc.items():
@@ -187,10 +229,14 @@ def main(options):
         generate_accounts_config()
 
     accounts = read_accounts_config()
+    main_regions = ['eu-west-1','eu-west-2','us-east-1','us-west-1','ap-southeast-1','ap-northeast-1']
 
     if options.action == "list_users":
         users_dc = get_iam_users_by_account(accounts)
-        create_xls(users_dc, options.filename)
+        create_xls(options.action, users_dc, options.filename)
+    elif options.action == "list_ec2":
+        ec2_dc = get_ec2_inventory_by_account(accounts,main_regions)
+        create_xls(options.action, ec2_dc, options.filename)
     elif options.action == "set_tag":
         print("Coming....")
     else:
